@@ -1,7 +1,7 @@
 window.ANG_HR_CONFIG = {
   edition: 'premium',
   editionName: 'ANG HR Premium',
-  apiBaseUrl: '',
+  apiBaseUrl: 'https://script.google.com/macros/s/AKfycbxw2-0Xw4nSDW_Pcb88fPmM6qFxJP1-d_Ofbyhk2xQmg2HZtZOC8YoDA6TYn901XHhJ/exec',
   defaultPage: 'admin',
   features: {
     employeeHome: true,
@@ -17,8 +17,23 @@ window.ANG_HR_CONFIG = {
     salaryDraft: true,
     salaryReview: true,
     permissions: true,
+    people: true,
     shiftRules: true,
+    workTimeRules: true,
+    officialSalary: true,
+    laborInsurance: true,
+    healthInsurance: true,
+    pension: true,
+    bonus: true,
+    allowance: true,
+    deduction: true,
+    salaryPublish: true,
+    salarySlip: true,
+    advancedUploadReview: true,
     archive: true,
-    appWebView: true
+    driveExport: true,
+    systemSettings: true,
+    appWebView: true,
+    appReleaseReady: true
   }
 };
