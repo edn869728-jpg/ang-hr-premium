@@ -1,8 +1,8 @@
 window.ANG_HR_CONFIG = {
-  edition: 'basic',
-  editionName: 'ANG HR Basic',
-  apiBaseUrl: 'https://script.google.com/macros/s/AKfycbylg5KENMMvwj6aqeK51ASk-uT6CsJLob6dix2ELmoP5rf8Yla5RnRKTiaVtkrA9dPm/exec',
-  defaultPage: 'employee',
+  edition: 'plus',
+  editionName: 'ANG HR Plus',
+  apiBaseUrl: 'https://script.google.com/macros/s/AKfycbzSwufSpMlK-DdmrxJ6m-jZvUT__iSUsDdCNXQaXUbCScs_-h9MTWP_7grMIq03RzILbQ/exec',
+  defaultPage: 'admin',
   features: {
     employeeLogin: true,
     employeeHome: true,
@@ -16,9 +16,25 @@ window.ANG_HR_CONFIG = {
     upload: true,
     notices: true,
     themeSave: true,
-    adminSchedule: false,
-    salaryReview: false,
-    permissions: false,
-    archive: false
+    adminHome: true,
+    leaveReview: true,
+    clockFixReview: true,
+    uploadReview: true,
+    messageReview: true,
+    noticePublish: true,
+    preselectSummary: true,
+    scheduleCreate: true,
+    schedulePublish: true,
+    employeeScheduleCalendar: true,
+    salaryDraft: true,
+    shiftView: true,
+    creatorPermissionCenter: false,
+    officialSalary: false,
+    laborInsurance: false,
+    healthInsurance: false,
+    pension: false,
+    archive: false,
+    driveExport: false,
+    advancedSystemSettings: false
   }
 };
