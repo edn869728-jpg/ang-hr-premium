@@ -20,12 +20,40 @@
     return String(v || 'employee').trim().toLowerCase();
   }
 
-  function saveLogin(res){
+  function saveLogin(res, fallbackId){
     res = res || {};
-    var id = cleanId(res.id || res.employeeId || res.account || res.userId || localStorage.getItem(KEYS.id));
-    var name = String(res.name || res.nickname || res.displayName || id || '員工');
-    var role = cleanRole(res.role || res.permission || 'employee');
-    var token = String(res.token || res.loginToken || res.sessionToken || 'login-token-' + Date.now());
+    var id = cleanId(
+      res.id ||
+      res.employeeId ||
+      res.employee_id ||
+      res.account ||
+      res.userId ||
+      res.userid ||
+      (res.user && (res.user.id || res.user.employeeId || res.user.account)) ||
+      fallbackId ||
+      localStorage.getItem(KEYS.id)
+    );
+    var name = String(
+      res.name ||
+      res.nickname ||
+      res.displayName ||
+      (res.user && (res.user.name || res.user.nickname || res.user.displayName)) ||
+      id ||
+      '員工'
+    );
+    var role = cleanRole(
+      res.role ||
+      res.permission ||
+      (res.user && (res.user.role || res.user.permission)) ||
+      'employee'
+    );
+    var token = String(
+      res.token ||
+      res.loginToken ||
+      res.sessionToken ||
+      (res.user && (res.user.token || res.user.loginToken || res.user.sessionToken)) ||
+      'login-token-' + Date.now()
+    );
 
     if (!id) return false;
 
@@ -60,19 +88,19 @@
   function logout(){
     Object.keys(KEYS).forEach(function(k){ localStorage.removeItem(KEYS[k]); });
     sessionStorage.clear();
-    location.href = 'login.html?v=11';
+    location.href = 'login.html?v=12';
   }
 
   function requireLogin(roleGroup){
     var user = getUser();
     if (!user) {
-      location.href = 'login.html?v=11';
+      location.href = 'login.html?v=12';
       return null;
     }
     if (roleGroup === 'admin') {
       var r = cleanRole(user.role);
       if (!(r === 'admin' || r === 'manager' || r === 'creator')) {
-        location.href = 'employee_home.html?v=11';
+        location.href = 'employee_home.html?v=12';
         return null;
       }
     }
@@ -85,6 +113,7 @@
     isLoggedIn: isLoggedIn,
     logout: logout,
     requireLogin: requireLogin,
-    cleanId: cleanId
+    cleanId: cleanId,
+    cleanRole: cleanRole
   };
 })();
