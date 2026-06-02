@@ -1,18 +1,24 @@
-(function(window, document) {
+(function(window, document){
   'use strict';
-  function ready(fn){if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',fn);}else{fn();}}
-  function setText(id,text){var el=document.getElementById(id);if(el)el.textContent=text||'';}
-  function show(id,display){var el=document.getElementById(id);if(el)el.style.display=display||'block';}
-  function hide(id){var el=document.getElementById(id);if(el)el.style.display='none';}
-  function bindAutoLogin(){
-    if(!window.ANGAuth){console.warn('ANGApp: ANGAuth is not ready');return;}
-    window.ANGAuth.bootstrapFromQuery({autoRedirect:false});window.ANGAuth.installGlobals();
-    var session=window.ANGAuth.getSession();window.ANGApp.session=session;window.currentId=session.id||window.currentId||'';window.currentName=session.name||session.id||window.currentName||'';
-    setText('globalUserName',session.name||session.id||'');setText('welcomeName',session.name||session.id||'員工');setText('employeeIdText',session.id||'-');
-    if(session.id){try{document.body.setAttribute('data-login-id',session.id);document.body.setAttribute('data-plan',session.plan||'premium');document.body.setAttribute('data-role',session.role||'employee');}catch(err){}}
+  var cfg = window.ANG_HR_CONFIG || {};
+  var minutes = Number(cfg.idleMinutes || 15);
+  var limit = Math.max(1, minutes) * 60 * 1000;
+  var timer = null;
+  var enabled = true;
+
+  function hasLogin(){ return !!(window.ANGAuth && ANGAuth.isLoggedIn && ANGAuth.isLoggedIn()); }
+  function reset(){
+    if (!enabled) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function(){
+      if (!hasLogin()) return;
+      try { alert('🔒 已閒置超過 ' + minutes + ' 分鐘，系統將自動登出。'); } catch(err) {}
+      if (window.ANGAuth && ANGAuth.logout) ANGAuth.logout();
+    }, limit);
   }
-  function navigate(page){if(!window.ANGAuth)return;window.ANGAuth.goPage(page);}
-  function logout(){if(!window.ANGAuth)return;window.ANGAuth.clearSession();window.ANGAuth.goLogin();}
-  function expose(){window.ANGApp=window.ANGApp||{};window.ANGApp.bindAutoLogin=bindAutoLogin;window.ANGApp.navigate=navigate;window.ANGApp.logout=logout;window.ANGApp.show=show;window.ANGApp.hide=hide;window.ANGApp.setText=setText;window.goPage=function(page){navigate(page);};window.goClock=function(){navigate('employee_clock.html');};window.goSalary=function(){navigate('employee_salary.html');};window.goUpload=function(){navigate('employee_upload.html');};window.goIndex=function(){if(window.ANGAuth)window.ANGAuth.goHome();};window.logout=logout;}
-  expose();ready(function(){expose();bindAutoLogin();});
+  ['mousedown','mousemove','keypress','keydown','scroll','touchstart','click','visibilitychange'].forEach(function(evt){
+    document.addEventListener(evt, reset, true);
+  });
+  window.ANGIdle = { reset:reset, stop:function(){enabled=false;if(timer)clearTimeout(timer);}, start:function(){enabled=true;reset();} };
+  reset();
 })(window, document);

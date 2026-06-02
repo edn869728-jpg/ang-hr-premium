@@ -1,37 +1,289 @@
-(function(window, document) {
+(function(window, document){
   'use strict';
-  var STORAGE_KEYS={session:'ang_hr_session',isLoggedIn:'isLoggedIn',loginId:'loginId',empLoggedIn:'emp_logged_in',empId:'emp_id',employeeId:'employee_id',empName:'emp_name',token:'token',authToken:'auth_token',deviceId:'device_id',authDeviceId:'auth_device_id',plan:'ang_hr_plan',role:'ang_hr_role',companyId:'ang_hr_company_id',companyName:'ang_hr_company_name',paidStatus:'ang_hr_paid_status',source:'ang_hr_source'};
-  function safeString(value){if(value===null||value===undefined)return '';return String(value).trim();}
-  function getQuery(){var out={};try{var sp=new URLSearchParams(window.location.search||'');sp.forEach(function(value,key){out[key]=safeString(value);});}catch(err){}return out;}
-  function cleanId(value){var id=safeString(value).toUpperCase().replace(/\s+/g,'');if(!id)return '';var digits=id.match(/\d{4,}/);if(id.indexOf('ANG')!==0&&digits)return 'ANG'+digits[0].slice(-4);if(id.indexOf('ANG')!==0&&/^\d+$/.test(id))return 'ANG'+id.padStart(4,'0');return id;}
-  function normalizePlan(value){var plan=safeString(value).toLowerCase();if(plan==='premium')return 'premium';if(plan==='plus')return 'plus';return 'basic';}
-  function detectPlan(){var q=getQuery();var hostPath=(window.location.href||'').toLowerCase();if(q.plan)return normalizePlan(q.plan);if(q.mode)return normalizePlan(q.mode);var saved=localStorage.getItem(STORAGE_KEYS.plan);if(saved)return normalizePlan(saved);if(hostPath.indexOf('premium')>=0)return 'premium';if(hostPath.indexOf('plus')>=0)return 'plus';return 'basic';}
-  function detectRole(id,role){var r=safeString(role).toLowerCase();if(r)return r;if(cleanId(id)==='ANG0603')return 'creator';return 'employee';}
+
+  var SESSION_KEY = 'ang_hr_secure_session_v4';
+  var CSRF_KEY = 'ang_hr_csrf_v4';
+  var LEGACY_KEYS = [
+    'ang_employee_id','ang_employee_name','ang_employee_role','ang_hr_token',
+    'emp_logged_in','emp_name','isLoggedIn','loginId','auth_token','token','device_id','auth_device_id',
+    'ang_hr_plan','ang_hr_role','ang_hr_company_id','ang_hr_company_name','ang_hr_paid_status','ang_hr_source',
+    'ang_hr_session','ang_hr_session_v1'
+  ];
+
+  function str(v){ return v == null ? '' : String(v).trim(); }
+  function normalizeId(v){
+    var id = str(v).toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9_-]/g,'');
+    if (!id) return '';
+    if (id.indexOf('ANG') !== 0 && /^\d+$/.test(id)) id = 'ANG' + id.padStart(4,'0');
+    return id;
+  }
+  function normalizePlan(v){
+    var p = str(v || window.ANG_HR_DEFAULT_PLAN || 'basic').toLowerCase();
+    return p === 'premium' || p === 'plus' ? p : 'basic';
+  }
+  function normalizeRole(v){
+    var r = str(v).toLowerCase();
+    if (['creator','manager','admin','employee'].indexOf(r) >= 0) return r;
+    return 'employee';
+  }
+  function getQuery(){
+    var out = {};
+    try { new URLSearchParams(location.search || '').forEach(function(v,k){ out[k]=str(v); }); } catch(err) {}
+    return out;
+  }
+  function now(){ return Date.now(); }
+  function expiresAt(seconds){
+    var s = parseInt(seconds || '3600', 10);
+    if (!isFinite(s) || s <= 0) s = 3600;
+    return now() + s * 1000;
+  }
+  function getCSRFToken(){
+    var t = sessionStorage.getItem(CSRF_KEY);
+    if (!t) {
+      t = 'csrf_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem(CSRF_KEY, t);
+    }
+    return t;
+  }
+
+  function clearUrlSensitiveParams(){
+    try {
+      var url = new URL(location.href);
+      ['activation_code','activationCode','code','token','TOKEN','api','api_url','gas','autologin'].forEach(function(k){ url.searchParams.delete(k); });
+      history.replaceState({}, document.title, url.toString());
+    } catch(err) {}
+  }
+
+  function saveSession(res){
+    res = res || {};
+    var id = normalizeId(res.id || res.employee_id || res.employeeId || res.account || (res.user && (res.user.id || res.user.employee_id)) || '');
+    var token = str(res.token || res.session_token || res.sessionToken || res.loginToken || (res.user && (res.user.token || res.user.sessionToken)) || '');
+    var deviceId = str(res.device_id || res.deviceId || res.device || localStorage.getItem('device_id') || '');
+    if (!id || !token) return { ok:false, message:'登入回應缺少 id 或 token，已拒絕儲存。' };
+
+    var session = {
+      ok: true,
+      id: id,
+      name: str(res.name || res.nickname || res.displayName || (res.user && (res.user.name || res.user.nickname)) || id),
+      role: normalizeRole(res.role || res.permission || (res.user && (res.user.role || res.user.permission))),
+      plan: normalizePlan(res.plan),
+      token: token,
+      device_id: deviceId,
+      company_id: str(res.company_id || res.companyId || ''),
+      company_name: str(res.company_name || res.companyName || ''),
+      paid_status: str(res.paid_status || res.paidStatus || 'active'),
+      seat_limit: parseInt(res.seat_limit || res.seatLimit || '5', 10) || 5,
+      expires_at: parseInt(res.expires_at || res.expiresAt || '', 10) || expiresAt(res.expires_in || res.expiresIn || 3600),
+      source: str(res.source || 'device'),
+      saved_at: new Date().toISOString()
+    };
+
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    sessionStorage.setItem('ang_hr_token', session.token);
+    sessionStorage.setItem('ang_employee_id', session.id);
+    sessionStorage.setItem('ang_employee_role', session.role);
+    sessionStorage.setItem('device_id', session.device_id);
+
+    /* legacy compatibility: only non-secret basics in localStorage */
+    localStorage.setItem('ang_employee_id', session.id);
+    localStorage.setItem('ang_employee_name', session.name);
+    localStorage.setItem('emp_logged_in', session.id);
+    localStorage.setItem('emp_name', session.name);
+    localStorage.setItem('isLoggedIn', 'true');
+    localStorage.setItem('loginId', session.id);
+    localStorage.setItem('device_id', session.device_id);
+    localStorage.setItem('ang_hr_plan', session.plan);
+    localStorage.setItem('ang_hr_company_id', session.company_id);
+    localStorage.setItem('ang_hr_paid_status', session.paid_status);
+
+    window.ANG_CURRENT_SESSION = session;
+    window.ANG_APP_LOGIN = { id:session.id, token:session.token, device_id:session.device_id, plan:session.plan, role:session.role, source:'app' };
+    return { ok:true, session:session };
+  }
+
   function getSession(){
-    var empty={id:'',token:'',device_id:'',plan:detectPlan(),role:'',name:'',company_id:'',company_name:'',paid_status:'',source:''};
-    try{var raw=localStorage.getItem(STORAGE_KEYS.session);if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed==='object'){parsed.id=cleanId(parsed.id);parsed.plan=normalizePlan(parsed.plan||detectPlan());return Object.assign(empty,parsed);}}}catch(err){}
-    var id=cleanId(localStorage.getItem(STORAGE_KEYS.empLoggedIn)||localStorage.getItem(STORAGE_KEYS.loginId)||sessionStorage.getItem(STORAGE_KEYS.empLoggedIn)||sessionStorage.getItem(STORAGE_KEYS.loginId)||'');
-    if(!id)return empty;
-    return {id:id,token:safeString(localStorage.getItem(STORAGE_KEYS.authToken)||localStorage.getItem(STORAGE_KEYS.token)||''),device_id:safeString(localStorage.getItem(STORAGE_KEYS.deviceId)||''),plan:normalizePlan(localStorage.getItem(STORAGE_KEYS.plan)||detectPlan()),role:safeString(localStorage.getItem(STORAGE_KEYS.role)||detectRole(id)),name:safeString(localStorage.getItem(STORAGE_KEYS.empName)||id),company_id:safeString(localStorage.getItem(STORAGE_KEYS.companyId)||''),company_name:safeString(localStorage.getItem(STORAGE_KEYS.companyName)||''),paid_status:safeString(localStorage.getItem(STORAGE_KEYS.paidStatus)||'active'),source:safeString(localStorage.getItem(STORAGE_KEYS.source)||'web')};
+    try {
+      var raw = sessionStorage.getItem(SESSION_KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && s.id && s.token) return s;
+      }
+    } catch(err) {}
+
+    var id = normalizeId(localStorage.getItem('ang_employee_id') || localStorage.getItem('emp_logged_in') || localStorage.getItem('loginId'));
+    if (!id) return { id:'', token:'', role:'', plan:normalizePlan(), device_id:'' };
+    return {
+      id: id,
+      token: str(sessionStorage.getItem('ang_hr_token') || ''),
+      role: normalizeRole(sessionStorage.getItem('ang_employee_role') || ''),
+      plan: normalizePlan(localStorage.getItem('ang_hr_plan')),
+      name: str(localStorage.getItem('ang_employee_name') || localStorage.getItem('emp_name') || id),
+      device_id: str(localStorage.getItem('device_id') || sessionStorage.getItem('device_id') || ''),
+      company_id: str(localStorage.getItem('ang_hr_company_id') || ''),
+      paid_status: str(localStorage.getItem('ang_hr_paid_status') || ''),
+      expires_at: 0
+    };
   }
-  function saveSession(input){
-    input=input||{};var q=getQuery();var old=getSession();
-    var id=cleanId(input.id||input.ID||q.id||q.ID||old.id||localStorage.getItem(STORAGE_KEYS.empLoggedIn)||localStorage.getItem(STORAGE_KEYS.loginId)||'');
-    var token=safeString(input.token||input.TOKEN||q.token||q.TOKEN||old.token||localStorage.getItem(STORAGE_KEYS.authToken)||localStorage.getItem(STORAGE_KEYS.token)||'');
-    var deviceId=safeString(input.device_id||input.deviceId||input.device||q.device_id||q.deviceId||q.device||old.device_id||localStorage.getItem(STORAGE_KEYS.deviceId)||'');
-    var plan=normalizePlan(input.plan||q.plan||old.plan||detectPlan());var role=detectRole(id,input.role||q.role||old.role);var name=safeString(input.name||q.name||old.name||id);
-    var companyId=safeString(input.company_id||input.companyId||q.company_id||old.company_id||'');var companyName=safeString(input.company_name||input.companyName||q.company_name||old.company_name||'');var paidStatus=safeString(input.paid_status||input.paidStatus||q.paid_status||old.paid_status||'active');var source=safeString(input.source||q.source||old.source||'web');
-    var session={ok:true,id:id,token:token,device_id:deviceId,plan:plan,role:role,name:name,company_id:companyId,company_name:companyName,paid_status:paidStatus,source:source,updated_at:new Date().toISOString()};
-    try{localStorage.setItem(STORAGE_KEYS.session,JSON.stringify(session));localStorage.setItem(STORAGE_KEYS.isLoggedIn,'true');localStorage.setItem(STORAGE_KEYS.loginId,id);localStorage.setItem(STORAGE_KEYS.empLoggedIn,id);localStorage.setItem(STORAGE_KEYS.empId,id);localStorage.setItem(STORAGE_KEYS.employeeId,id);localStorage.setItem(STORAGE_KEYS.empName,name||id);localStorage.setItem(STORAGE_KEYS.authToken,token);localStorage.setItem(STORAGE_KEYS.token,token);localStorage.setItem(STORAGE_KEYS.deviceId,deviceId);localStorage.setItem(STORAGE_KEYS.authDeviceId,deviceId);localStorage.setItem(STORAGE_KEYS.plan,plan);localStorage.setItem(STORAGE_KEYS.role,role);localStorage.setItem(STORAGE_KEYS.companyId,companyId);localStorage.setItem(STORAGE_KEYS.companyName,companyName);localStorage.setItem(STORAGE_KEYS.paidStatus,paidStatus);localStorage.setItem(STORAGE_KEYS.source,source);sessionStorage.setItem(STORAGE_KEYS.isLoggedIn,'true');sessionStorage.setItem(STORAGE_KEYS.loginId,id);sessionStorage.setItem(STORAGE_KEYS.empLoggedIn,id);sessionStorage.setItem(STORAGE_KEYS.empId,id);sessionStorage.setItem(STORAGE_KEYS.employeeId,id);sessionStorage.setItem(STORAGE_KEYS.authToken,token);sessionStorage.setItem(STORAGE_KEYS.token,token);sessionStorage.setItem(STORAGE_KEYS.deviceId,deviceId);}catch(err){}
-    window.ANG_CURRENT_SESSION=session;window.ANG_APP_LOGIN={id:id,token:token,device_id:deviceId,plan:plan,role:role,source:source};return session;
+
+  function getToken(){
+    var s = getSession();
+    if (!s || !s.token) return '';
+    if (s.expires_at && now() > Number(s.expires_at)) { clearSession(); return ''; }
+    return s.token;
   }
-  function hasSession(){var s=getSession();return !!(s&&s.id);}
-  function clearSession(){try{Object.keys(STORAGE_KEYS).forEach(function(key){localStorage.removeItem(STORAGE_KEYS[key]);sessionStorage.removeItem(STORAGE_KEYS[key]);});localStorage.removeItem('auth_id');localStorage.removeItem('auth_device_id');localStorage.removeItem('ang_hr_session_v1');sessionStorage.removeItem('auth_id');sessionStorage.removeItem('auth_device_id');}catch(err){}window.ANG_CURRENT_SESSION=null;window.ANG_APP_LOGIN=null;}
-  function buildUrl(file,extra){var session=getSession();var page=safeString(file||'employee_home.htm');var base=/^https?:\/\//i.test(page)?page:'./'+page.replace(/^\.\//,'');var url;try{url=new URL(base,window.location.href);}catch(err){url=new URL('./employee_home.htm',window.location.href);}if(session.id)url.searchParams.set('id',session.id);if(session.token)url.searchParams.set('token',session.token);if(session.device_id)url.searchParams.set('device_id',session.device_id);url.searchParams.set('plan',session.plan||detectPlan());url.searchParams.set('role',session.role||detectRole(session.id));url.searchParams.set('company_id',session.company_id||'');url.searchParams.set('paid_status',session.paid_status||'active');url.searchParams.set('source',session.source||'web');if(extra&&typeof extra==='object'){Object.keys(extra).forEach(function(k){if(extra[k]!==undefined&&extra[k]!==null)url.searchParams.set(k,safeString(extra[k]));});}return url.toString();}
-  function goPage(file,extra){window.location.href=buildUrl(file,extra||{});}function goHome(){goPage('employee_home.htm');}function goLogin(){window.location.href='./index.html';}
-  function bootstrapFromQuery(options){options=options||{};var q=getQuery();var id=cleanId(q.id||q.ID||'');var token=safeString(q.token||q.TOKEN||'');var deviceId=safeString(q.device_id||q.deviceId||q.device||'');var hasQueryLogin=!!(id||token||deviceId||q.source==='app'||q.autologin==='1'||q.app==='ang_hr');if(hasQueryLogin){saveSession({id:id||getSession().id,token:token||getSession().token,device_id:deviceId||getSession().device_id,plan:q.plan||q.mode||detectPlan(),role:q.role||'',company_id:q.company_id||'',company_name:q.company_name||'',paid_status:q.paid_status||'active',name:q.name||'',source:q.source||(q.app==='ang_hr'?'app':'web')});}if(options.autoRedirect&&hasSession())goHome();return {ok:true,fromQuery:hasQueryLogin,session:getSession()};}
-  function requireLogin(options){options=options||{};var q=getQuery();if(q.id||q.token||q.device_id||q.deviceId||q.source==='app'||q.autologin==='1')bootstrapFromQuery({autoRedirect:false});if(!hasSession()){if(options.redirect!==false)goLogin();return null;}return getSession();}
-  function installGlobals(){window.currentId=window.currentId||getSession().id||'';window.currentName=window.currentName||getSession().name||getSession().id||'';window.goPage=window.goPage||function(page){goPage(page);};window.goClock=window.goClock||function(){goPage('employee_clock.html');};window.goSalary=window.goSalary||function(){goPage('employee_salary.html');};window.goUpload=window.goUpload||function(){goPage('employee_upload.html');};window.goIndex=window.goIndex||function(){goHome();};window.logout=window.logout||function(){clearSession();goLogin();};}
-  var ANGAuth={STORAGE_KEYS:STORAGE_KEYS,safeString:safeString,getQuery:getQuery,cleanId:cleanId,normalizePlan:normalizePlan,detectPlan:detectPlan,detectRole:detectRole,saveSession:saveSession,getSession:getSession,hasSession:hasSession,clearSession:clearSession,buildUrl:buildUrl,goPage:goPage,goHome:goHome,goLogin:goLogin,bootstrapFromQuery:bootstrapFromQuery,requireLogin:requireLogin,installGlobals:installGlobals};
-  window.ANGAuth=ANGAuth;installGlobals();try{if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',installGlobals);}else{installGlobals();}}catch(err){}
+
+  function isLoggedIn(){ return !!getToken(); }
+  function getUser(){
+    var s = getSession();
+    if (!s || !s.id || !getToken()) return null;
+    return { id:s.id, employeeId:s.id, name:s.name || s.id, role:s.role || 'employee', plan:s.plan || normalizePlan(), token:s.token, device_id:s.device_id || '', paid_status:s.paid_status || '' };
+  }
+  function user(){ return getUser() || { id:'', name:'', role:'', token:'', plan:normalizePlan(), device_id:'' }; }
+
+  function clearSession(){
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(CSRF_KEY);
+      sessionStorage.removeItem('ang_hr_token');
+      sessionStorage.removeItem('ang_employee_id');
+      sessionStorage.removeItem('ang_employee_role');
+      sessionStorage.removeItem('device_id');
+      LEGACY_KEYS.forEach(function(k){
+        if (k !== 'device_id') localStorage.removeItem(k);
+      });
+    } catch(err) {}
+    window.ANG_CURRENT_SESSION = null;
+    window.ANG_APP_LOGIN = null;
+  }
+
+  function toast(msg){
+    var el = document.getElementById('toast');
+    if (!el) { alert(msg); return; }
+    el.textContent = msg || '';
+    el.classList.add('show');
+    el.style.display = 'block';
+    setTimeout(function(){ el.classList.remove('show'); el.style.display='none'; }, 2600);
+  }
+
+  function pageName(){
+    var p = (document.body && document.body.dataset && document.body.dataset.page) || '';
+    if (p) return p;
+    var file = (location.pathname.split('/').pop() || 'index.html').replace(/\.html?$/i,'');
+    return file || 'index';
+  }
+
+  function goPage(file){
+    var s = getSession();
+    var url = new URL(file, location.href);
+    if (s.id) url.searchParams.set('id', s.id);
+    if (s.device_id) url.searchParams.set('device_id', s.device_id);
+    url.searchParams.set('plan', s.plan || normalizePlan());
+    url.searchParams.set('source', 'web');
+    location.href = url.toString();
+  }
+  function goHome(){ goPage('employee_home.htm'); }
+  function goLogin(){ location.href = new URL('index.html', location.href).toString(); }
+  function go(kind){ if(kind === 'admin') goPage('admin_home.html'); else goHome(); }
+  function logout(){ clearSession(); goLogin(); }
+
+  function requireLogin(roleGroup){
+    var p = pageName();
+    if (['index','login','activate','noperm'].indexOf(p) >= 0) return true;
+    var u = getUser();
+    if (!u) { goLogin(); return false; }
+    if (roleGroup === 'admin') {
+      var r = normalizeRole(u.role);
+      if (['admin','manager','creator'].indexOf(r) < 0) { goPage('employee_home.htm'); return false; }
+    }
+    return true;
+  }
+
+  async function activate(input){
+    input = input || {};
+    var q = getQuery();
+    var id = normalizeId(input.id || q.id || q.ID || localStorage.getItem('ang_employee_id') || '');
+    var activationCode = str(input.activation_code || input.activationCode || input.code || q.activation_code || q.activationCode || q.code || q.token || q.TOKEN || '');
+    var deviceId = str(input.device_id || input.deviceId || input.device || q.device_id || q.deviceId || q.device || localStorage.getItem('device_id') || '');
+    var plan = normalizePlan(input.plan || q.plan || q.mode || window.ANG_HR_DEFAULT_PLAN);
+
+    if (!id) return { ok:false, message:'缺少員工 ID' };
+    if (!activationCode) return { ok:false, message:'缺少 activation_code / 啟用碼' };
+    if (!deviceId) {
+      deviceId = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('device_id', deviceId);
+    }
+
+    var res = await window.ANG_HR_API.post('deviceActivationLogin', {
+      id: id,
+      activation_code: activationCode,
+      device_id: deviceId,
+      plan: plan,
+      source: q.source || 'web',
+      app: q.app || 'ang_hr'
+    });
+
+    if (!res || !res.ok) return res || { ok:false, message:'啟用失敗' };
+    res.id = res.id || id;
+    res.device_id = res.device_id || deviceId;
+    res.plan = res.plan || plan;
+    res.source = q.source || 'device';
+    var saved = saveSession(res);
+    if (!saved.ok) return saved;
+    clearUrlSensitiveParams();
+    return { ok:true, session:saved.session, message:res.message || '啟用成功' };
+  }
+
+  function bootstrapFromQuery(options){
+    options = options || {};
+    var q = getQuery();
+    var hasCode = !!(q.activation_code || q.activationCode || q.code || q.token || q.TOKEN);
+    var id = normalizeId(q.id || q.ID || '');
+    if (!id || !hasCode) return { fromQuery:false };
+
+    activate({ id:id }).then(function(res){
+      if (!res || !res.ok) { toast((res && res.message) || '啟用失敗'); return; }
+      if (options.autoRedirect !== false && (q.autologin === '1' || q.source === 'app' || q.app === 'ang_hr')) {
+        goHome();
+      }
+    });
+    return { fromQuery:true };
+  }
+
+  function installGlobals(){
+    window.currentId = (getSession().id || window.currentId || '');
+    window.currentName = (getSession().name || getSession().id || window.currentName || '');
+  }
+
+  window.ANGAuth = {
+    normalizeId: normalizeId,
+    cleanId: normalizeId,
+    cleanRole: normalizeRole,
+    getQuery: getQuery,
+    saveSession: saveSession,
+    save: function(v){ return saveSession(v).ok; },
+    saveLogin: saveSession,
+    getSession: getSession,
+    get: getSession,
+    getUser: getUser,
+    user: user,
+    currentUser: user,
+    isLoggedIn: isLoggedIn,
+    getToken: getToken,
+    getCSRFToken: getCSRFToken,
+    clearSession: clearSession,
+    clear: clearSession,
+    logout: logout,
+    requireLogin: requireLogin,
+    activate: activate,
+    bootstrapFromQuery: bootstrapFromQuery,
+    installGlobals: installGlobals,
+    goPage: goPage,
+    goHome: goHome,
+    goLogin: goLogin,
+    go: go,
+    toast: toast
+  };
+
+  window.ANG_HR_AUTH = window.ANG_HR_AUTH || window.ANGAuth;
+  window.ANGAuth.installGlobals();
 })(window, document);
