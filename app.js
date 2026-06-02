@@ -1,118 +1,37 @@
-
-(function(window){
+(function(window, document) {
   'use strict';
-  const cfg = window.ANG_HR_CONFIG || {};
-  const routes = cfg.routes || {};
-  const storagePrefix = 'ang_hr_' + (cfg.version || 'app') + '_';
-
-  function qs(){ return new URLSearchParams(window.location.search || ''); }
-  function clean(v){ return String(v == null ? '' : v).trim(); }
-  function normalizeId(input){
-    let raw = clean(input).toUpperCase().replace(/\s+/g,'');
-    if (!raw) return '';
-    const m1 = raw.match(/^ANG\d{1,8}$/);
-    if (m1) return 'ANG' + raw.replace(/^ANG/,'').padStart(4,'0');
-    const m2 = raw.match(/(\d{1,8})/);
-    if (m2) return 'ANG' + m2[1].padStart(4,'0');
-    return raw;
+  var STORAGE_KEYS={session:'ang_hr_session',isLoggedIn:'isLoggedIn',loginId:'loginId',empLoggedIn:'emp_logged_in',empId:'emp_id',employeeId:'employee_id',empName:'emp_name',token:'token',authToken:'auth_token',deviceId:'device_id',authDeviceId:'auth_device_id',plan:'ang_hr_plan',role:'ang_hr_role',companyId:'ang_hr_company_id',companyName:'ang_hr_company_name',paidStatus:'ang_hr_paid_status',source:'ang_hr_source'};
+  function safeString(value){if(value===null||value===undefined)return '';return String(value).trim();}
+  function getQuery(){var out={};try{var sp=new URLSearchParams(window.location.search||'');sp.forEach(function(value,key){out[key]=safeString(value);});}catch(err){}return out;}
+  function cleanId(value){var id=safeString(value).toUpperCase().replace(/\s+/g,'');if(!id)return '';var digits=id.match(/\d{4,}/);if(id.indexOf('ANG')!==0&&digits)return 'ANG'+digits[0].slice(-4);if(id.indexOf('ANG')!==0&&/^\d+$/.test(id))return 'ANG'+id.padStart(4,'0');return id;}
+  function normalizePlan(value){var plan=safeString(value).toLowerCase();if(plan==='premium')return 'premium';if(plan==='plus')return 'plus';return 'basic';}
+  function detectPlan(){var q=getQuery();var hostPath=(window.location.href||'').toLowerCase();if(q.plan)return normalizePlan(q.plan);if(q.mode)return normalizePlan(q.mode);var saved=localStorage.getItem(STORAGE_KEYS.plan);if(saved)return normalizePlan(saved);if(hostPath.indexOf('premium')>=0)return 'premium';if(hostPath.indexOf('plus')>=0)return 'plus';return 'basic';}
+  function detectRole(id,role){var r=safeString(role).toLowerCase();if(r)return r;if(cleanId(id)==='ANG0603')return 'creator';return 'employee';}
+  function getSession(){
+    var empty={id:'',token:'',device_id:'',plan:detectPlan(),role:'',name:'',company_id:'',company_name:'',paid_status:'',source:''};
+    try{var raw=localStorage.getItem(STORAGE_KEYS.session);if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed==='object'){parsed.id=cleanId(parsed.id);parsed.plan=normalizePlan(parsed.plan||detectPlan());return Object.assign(empty,parsed);}}}catch(err){}
+    var id=cleanId(localStorage.getItem(STORAGE_KEYS.empLoggedIn)||localStorage.getItem(STORAGE_KEYS.loginId)||sessionStorage.getItem(STORAGE_KEYS.empLoggedIn)||sessionStorage.getItem(STORAGE_KEYS.loginId)||'');
+    if(!id)return empty;
+    return {id:id,token:safeString(localStorage.getItem(STORAGE_KEYS.authToken)||localStorage.getItem(STORAGE_KEYS.token)||''),device_id:safeString(localStorage.getItem(STORAGE_KEYS.deviceId)||''),plan:normalizePlan(localStorage.getItem(STORAGE_KEYS.plan)||detectPlan()),role:safeString(localStorage.getItem(STORAGE_KEYS.role)||detectRole(id)),name:safeString(localStorage.getItem(STORAGE_KEYS.empName)||id),company_id:safeString(localStorage.getItem(STORAGE_KEYS.companyId)||''),company_name:safeString(localStorage.getItem(STORAGE_KEYS.companyName)||''),paid_status:safeString(localStorage.getItem(STORAGE_KEYS.paidStatus)||'active'),source:safeString(localStorage.getItem(STORAGE_KEYS.source)||'web')};
   }
-  function storageKeys(){
-    return {
-      id: storagePrefix + 'id',
-      token: storagePrefix + 'token',
-      name: storagePrefix + 'name',
-      role: storagePrefix + 'role',
-      logged: storagePrefix + 'logged'
-    };
+  function saveSession(input){
+    input=input||{};var q=getQuery();var old=getSession();
+    var id=cleanId(input.id||input.ID||q.id||q.ID||old.id||localStorage.getItem(STORAGE_KEYS.empLoggedIn)||localStorage.getItem(STORAGE_KEYS.loginId)||'');
+    var token=safeString(input.token||input.TOKEN||q.token||q.TOKEN||old.token||localStorage.getItem(STORAGE_KEYS.authToken)||localStorage.getItem(STORAGE_KEYS.token)||'');
+    var deviceId=safeString(input.device_id||input.deviceId||input.device||q.device_id||q.deviceId||q.device||old.device_id||localStorage.getItem(STORAGE_KEYS.deviceId)||'');
+    var plan=normalizePlan(input.plan||q.plan||old.plan||detectPlan());var role=detectRole(id,input.role||q.role||old.role);var name=safeString(input.name||q.name||old.name||id);
+    var companyId=safeString(input.company_id||input.companyId||q.company_id||old.company_id||'');var companyName=safeString(input.company_name||input.companyName||q.company_name||old.company_name||'');var paidStatus=safeString(input.paid_status||input.paidStatus||q.paid_status||old.paid_status||'active');var source=safeString(input.source||q.source||old.source||'web');
+    var session={ok:true,id:id,token:token,device_id:deviceId,plan:plan,role:role,name:name,company_id:companyId,company_name:companyName,paid_status:paidStatus,source:source,updated_at:new Date().toISOString()};
+    try{localStorage.setItem(STORAGE_KEYS.session,JSON.stringify(session));localStorage.setItem(STORAGE_KEYS.isLoggedIn,'true');localStorage.setItem(STORAGE_KEYS.loginId,id);localStorage.setItem(STORAGE_KEYS.empLoggedIn,id);localStorage.setItem(STORAGE_KEYS.empId,id);localStorage.setItem(STORAGE_KEYS.employeeId,id);localStorage.setItem(STORAGE_KEYS.empName,name||id);localStorage.setItem(STORAGE_KEYS.authToken,token);localStorage.setItem(STORAGE_KEYS.token,token);localStorage.setItem(STORAGE_KEYS.deviceId,deviceId);localStorage.setItem(STORAGE_KEYS.authDeviceId,deviceId);localStorage.setItem(STORAGE_KEYS.plan,plan);localStorage.setItem(STORAGE_KEYS.role,role);localStorage.setItem(STORAGE_KEYS.companyId,companyId);localStorage.setItem(STORAGE_KEYS.companyName,companyName);localStorage.setItem(STORAGE_KEYS.paidStatus,paidStatus);localStorage.setItem(STORAGE_KEYS.source,source);sessionStorage.setItem(STORAGE_KEYS.isLoggedIn,'true');sessionStorage.setItem(STORAGE_KEYS.loginId,id);sessionStorage.setItem(STORAGE_KEYS.empLoggedIn,id);sessionStorage.setItem(STORAGE_KEYS.empId,id);sessionStorage.setItem(STORAGE_KEYS.employeeId,id);sessionStorage.setItem(STORAGE_KEYS.authToken,token);sessionStorage.setItem(STORAGE_KEYS.token,token);sessionStorage.setItem(STORAGE_KEYS.deviceId,deviceId);}catch(err){}
+    window.ANG_CURRENT_SESSION=session;window.ANG_APP_LOGIN={id:id,token:token,device_id:deviceId,plan:plan,role:role,source:source};return session;
   }
-  function save(auth){
-    const k = storageKeys();
-    const id = normalizeId(auth && auth.id);
-    if (!id) return null;
-    const name = clean(auth.name || auth.displayName || localStorage.getItem(k.name) || id);
-    const token = clean(auth.token || localStorage.getItem(k.token) || '');
-    const role = clean(auth.role || localStorage.getItem(k.role) || guessRole(id));
-    localStorage.setItem(k.id, id);
-    localStorage.setItem(k.name, name);
-    localStorage.setItem(k.token, token);
-    localStorage.setItem(k.role, role);
-    localStorage.setItem(k.logged, 'true');
-    // 舊版相容鍵，避免跳頁後抓不到員工 ID
-    localStorage.setItem('emp_logged_in', id);
-    localStorage.setItem('loginId', id);
-    localStorage.setItem('isLoggedIn', 'true');
-    localStorage.setItem('emp_name', name);
-    if (token) localStorage.setItem('loginToken', token);
-    return {id, name, token, role};
-  }
-  function get(){
-    const p = qs();
-    const k = storageKeys();
-    const urlId = normalizeId(p.get('id') || p.get('ID') || p.get('emp') || '');
-    const urlName = clean(p.get('name') || p.get('NAME') || '');
-    const urlToken = clean(p.get('token') || p.get('TOKEN') || '');
-    if (urlId) return save({id:urlId, name:urlName || localStorage.getItem(k.name) || localStorage.getItem('emp_name') || urlId, token:urlToken || localStorage.getItem(k.token) || localStorage.getItem('loginToken') || ''});
-    const id = normalizeId(localStorage.getItem(k.id) || localStorage.getItem('emp_logged_in') || localStorage.getItem('loginId') || '');
-    if (!id) return null;
-    return save({id, name: localStorage.getItem(k.name) || localStorage.getItem('emp_name') || id, token: localStorage.getItem(k.token) || localStorage.getItem('loginToken') || '', role: localStorage.getItem(k.role) || guessRole(id)});
-  }
-  function clear(){
-    const k = storageKeys();
-    Object.keys(k).forEach(function(x){ localStorage.removeItem(k[x]); });
-    ['emp_logged_in','loginId','isLoggedIn','emp_name','loginToken','authToken'].forEach(function(x){ localStorage.removeItem(x); });
-  }
-  function guessRole(id){
-    id = normalizeId(id);
-    if (id === 'ANG0603') return 'creator';
-    if (id === 'ANG0606') return 'manager';
-    if (id === 'ANG0601') return 'admin';
-    return 'employee';
-  }
-  function pageFile(key){
-    if (key === 'employee') return cfg.employeeHome || routes.employee || 'employee_home.html';
-    return routes[key] || key || 'index.html';
-  }
-  function buildUrl(key, extra, options){
-    const file = pageFile(key);
-    const url = new URL(file, window.location.href);
-    const auth = options && options.noAuth ? null : get();
-    if (auth && auth.id) url.searchParams.set('id', auth.id);
-    if (auth && auth.token) url.searchParams.set('token', auth.token);
-    if (auth && auth.name && auth.name !== auth.id) url.searchParams.set('name', auth.name);
-    if (extra) Object.keys(extra).forEach(function(k){ if (extra[k] !== undefined && extra[k] !== null && extra[k] !== '') url.searchParams.set(k, extra[k]); });
-    return url.pathname.split('/').pop() + url.search + url.hash;
-  }
-  function go(key, extra, options){ window.location.href = buildUrl(key, extra, options); }
-  function requireLogin(){
-    const auth = get();
-    if (!auth || !auth.id){ go('login', null, {noAuth:true}); return null; }
-    const p = qs();
-    if (!p.get('id') && !p.get('ID')) {
-      const url = new URL(window.location.href);
-      url.searchParams.set('id', auth.id);
-      if (auth.token) url.searchParams.set('token', auth.token);
-      if (auth.name && auth.name !== auth.id) url.searchParams.set('name', auth.name);
-      window.history.replaceState(null, '', url.pathname.split('/').pop() + url.search + url.hash);
-    }
-    window.currentId = auth.id;
-    window.currentName = auth.name;
-    window.currentRole = auth.role;
-    return auth;
-  }
-  function logout(){ clear(); go('login', null, {noAuth:true}); }
-  function hasGoogle(){ return typeof google !== 'undefined' && google && google.script && google.script.run; }
-  function toast(message){
-    let el = document.getElementById('toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'toast';
-      el.className = 'toast';
-      document.body.appendChild(el);
-    }
-    el.textContent = message || '';
-    el.style.display = 'block';
-    clearTimeout(window.__angToastTimer);
-    window.__angToastTimer = setTimeout(function(){ el.style.display = 'none'; }, 2600);
-  }
-  window.ANGAuth = {cfg, qs, clean, normalizeId, save, get, clear, logout, guessRole, pageFile, buildUrl, go, requireLogin, hasGoogle, toast};
-})(window);
+  function hasSession(){var s=getSession();return !!(s&&s.id);}
+  function clearSession(){try{Object.keys(STORAGE_KEYS).forEach(function(key){localStorage.removeItem(STORAGE_KEYS[key]);sessionStorage.removeItem(STORAGE_KEYS[key]);});localStorage.removeItem('auth_id');localStorage.removeItem('auth_device_id');localStorage.removeItem('ang_hr_session_v1');sessionStorage.removeItem('auth_id');sessionStorage.removeItem('auth_device_id');}catch(err){}window.ANG_CURRENT_SESSION=null;window.ANG_APP_LOGIN=null;}
+  function buildUrl(file,extra){var session=getSession();var page=safeString(file||'employee_home.htm');var base=/^https?:\/\//i.test(page)?page:'./'+page.replace(/^\.\//,'');var url;try{url=new URL(base,window.location.href);}catch(err){url=new URL('./employee_home.htm',window.location.href);}if(session.id)url.searchParams.set('id',session.id);if(session.token)url.searchParams.set('token',session.token);if(session.device_id)url.searchParams.set('device_id',session.device_id);url.searchParams.set('plan',session.plan||detectPlan());url.searchParams.set('role',session.role||detectRole(session.id));url.searchParams.set('company_id',session.company_id||'');url.searchParams.set('paid_status',session.paid_status||'active');url.searchParams.set('source',session.source||'web');if(extra&&typeof extra==='object'){Object.keys(extra).forEach(function(k){if(extra[k]!==undefined&&extra[k]!==null)url.searchParams.set(k,safeString(extra[k]));});}return url.toString();}
+  function goPage(file,extra){window.location.href=buildUrl(file,extra||{});}function goHome(){goPage('employee_home.htm');}function goLogin(){window.location.href='./index.html';}
+  function bootstrapFromQuery(options){options=options||{};var q=getQuery();var id=cleanId(q.id||q.ID||'');var token=safeString(q.token||q.TOKEN||'');var deviceId=safeString(q.device_id||q.deviceId||q.device||'');var hasQueryLogin=!!(id||token||deviceId||q.source==='app'||q.autologin==='1'||q.app==='ang_hr');if(hasQueryLogin){saveSession({id:id||getSession().id,token:token||getSession().token,device_id:deviceId||getSession().device_id,plan:q.plan||q.mode||detectPlan(),role:q.role||'',company_id:q.company_id||'',company_name:q.company_name||'',paid_status:q.paid_status||'active',name:q.name||'',source:q.source||(q.app==='ang_hr'?'app':'web')});}if(options.autoRedirect&&hasSession())goHome();return {ok:true,fromQuery:hasQueryLogin,session:getSession()};}
+  function requireLogin(options){options=options||{};var q=getQuery();if(q.id||q.token||q.device_id||q.deviceId||q.source==='app'||q.autologin==='1')bootstrapFromQuery({autoRedirect:false});if(!hasSession()){if(options.redirect!==false)goLogin();return null;}return getSession();}
+  function installGlobals(){window.currentId=window.currentId||getSession().id||'';window.currentName=window.currentName||getSession().name||getSession().id||'';window.goPage=window.goPage||function(page){goPage(page);};window.goClock=window.goClock||function(){goPage('employee_clock.html');};window.goSalary=window.goSalary||function(){goPage('employee_salary.html');};window.goUpload=window.goUpload||function(){goPage('employee_upload.html');};window.goIndex=window.goIndex||function(){goHome();};window.logout=window.logout||function(){clearSession();goLogin();};}
+  var ANGAuth={STORAGE_KEYS:STORAGE_KEYS,safeString:safeString,getQuery:getQuery,cleanId:cleanId,normalizePlan:normalizePlan,detectPlan:detectPlan,detectRole:detectRole,saveSession:saveSession,getSession:getSession,hasSession:hasSession,clearSession:clearSession,buildUrl:buildUrl,goPage:goPage,goHome:goHome,goLogin:goLogin,bootstrapFromQuery:bootstrapFromQuery,requireLogin:requireLogin,installGlobals:installGlobals};
+  window.ANGAuth=ANGAuth;installGlobals();try{if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',installGlobals);}else{installGlobals();}}catch(err){}
+})(window, document);
